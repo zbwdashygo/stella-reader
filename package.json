@@ -1,0 +1,22 @@
+{
+  "name": "stella-reader",
+  "version": "2.1.0",
+  "private": true,
+  "description": "Stella 星阅 · 跨设备 EPUB 阅读与听书",
+  "main": "shell/main.js",
+  "scripts": {
+    "start": "node shell/run.js",
+    "server": "node server/index.js",
+    "icon": "node shell/make-icon.js",
+    "test:e2e": "node test/e2e.mjs",
+    "make-fixtures": "node test/gen-fixtures.mjs"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "fast-xml-parser": "^5.11.2"
+  },
+  "devDependencies": {
+    "electron": "^32.2.5",
+    "puppeteer-core": "^23.6.0"
+  }
+}

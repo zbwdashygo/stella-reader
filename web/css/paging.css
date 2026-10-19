@@ -1,0 +1,24 @@
+.mobile-reading-stats,.mobile-page-controls{display:none}
+.mobile-mode-setting{display:none}
+@media(max-width:700px){
+ .mobile-mode-setting{display:block}
+ .reader-stage{overflow:hidden;perspective:1000px}
+ .chapter-frame{transform-origin:50% 50%;backface-visibility:hidden}
+ .page-is-turning .page-frame{box-shadow:0 0 26px #0003}
+ .page-is-turning .chapter-frame{will-change:transform,opacity}
+ .mobile-page-controls .mode-toggle{font-size:10px;padding:0 6px;color:var(--primary)}
+ html[data-reading-mode="scroll"] #btnPrevPage,html[data-reading-mode="scroll"] #btnNextPage{display:none}
+ html[data-reading-mode="scroll"] .mode-toggle{background:var(--primary-soft);font-size:12px;padding:0 12px}
+ :root{--footer-h:80px}
+ .reader-footer{height:calc(80px + env(safe-area-inset-bottom,0px));min-height:80px;flex:0 0 auto;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:4px 1fr;gap:10px 12px;padding:8px 12px calc(9px + env(safe-area-inset-bottom,0px));align-items:center}
+ .reader-footer>.book-progress-wrap{grid-row:1;grid-column:1 / -1;width:100%;padding:0}
+ .reader-footer>#btnPrevChapter,.reader-footer>#btnNextChapter,.reader-footer>#chapterIndicator,.reader-footer>#progressPercent{display:none}
+ .mobile-reading-stats{display:flex;flex-direction:column;gap:5px;grid-row:2;grid-column:1;min-width:0;text-align:left;align-self:center;font-variant-numeric:tabular-nums}
+ .mobile-reading-stats strong{font-size:12px;font-weight:650;color:var(--text);white-space:nowrap}
+ .mobile-reading-stats span{font-size:10px;color:var(--muted);white-space:nowrap}
+ .mobile-page-controls{display:flex;gap:5px;grid-row:2;grid-column:2;align-items:center}
+ .mobile-page-controls .btn{height:39px;min-height:39px;padding:0 9px;font-size:12px;border-radius:9px;white-space:nowrap}
+ .reader-footer .tts-mini{position:absolute;bottom:calc(88px + env(safe-area-inset-bottom,0px));right:12px;max-width:calc(100vw - 24px)}
+ .tts-panel{bottom:calc(90px + env(safe-area-inset-bottom,0px))}
+}
+@media(max-width:350px){.reader-footer{gap:10px 5px;padding-left:9px;padding-right:9px}.mobile-page-controls .btn{padding:0 6px;font-size:11px}.mobile-reading-stats strong{font-size:11px}.mobile-reading-stats span{font-size:9px}}

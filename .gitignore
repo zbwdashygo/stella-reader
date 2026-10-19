@@ -1,0 +1,31 @@
+# Personal library, settings and pairing credentials
+/data/
+**/.e2e-data/
+*.epub
+*.lnk
+*.jks
+*.keystore
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+**/voice-config.json
+**/sync-config.json
+**/voice-preferences.json
+# Dependencies and build outputs
+node_modules/
+__pycache__/
+*.pyc
+build/
+dist/
+*.apk
+*.idsig
+*.zip
+test/fixtures/
+test/shots/
+android-signing/
+.DS_Store
+Thumbs.db
+*.log
+!vendor/python/python312.zip

@@ -1,0 +1,40 @@
+'use strict';
+const assert=require('assert/strict'),fs=require('fs'),path=require('path'),os=require('os');
+const {start}=require('../server');const puppeteer=require('puppeteer-core');
+const temp=fs.mkdtempSync(path.join(os.tmpdir(),'stella-test-'));let a,b,browser;let count=0;
+function ok(label){count++;console.log('PASS',label);}
+async function call(base,route,method='GET',body){const r=await fetch(base+route,{method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});assert(r.ok,await r.clone().text());return r.json();}
+(async()=>{
+ a=await start({port:0,dataDir:path.join(temp,'pc')});b=await start({port:0,dataDir:path.join(temp,'phone')});const A='http://127.0.0.1:'+a.port,B='http://127.0.0.1:'+b.port;
+ const fixture=path.join(__dirname,'fixtures','中文样例.epub'),copy=path.join(temp,'same-book.epub');fs.copyFileSync(fixture,copy);
+ const bookA=(await call(A,'/api/books/import','POST',{path:fixture})).book,bookB=(await call(B,'/api/books/import','POST',{path:copy})).book;
+ assert.notEqual(bookA.id,bookB.id);assert.equal(bookA.fingerprint,bookB.fingerprint);assert.match(bookA.fingerprint,/^[a-f0-9]{64}$/);ok('同一 EPUB 不同路径仍能跨端识别');
+ browser=await puppeteer.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:'new',pipe:true,timeout:20000,args:['--no-sandbox','--disable-gpu','--disable-extensions','--no-first-run','--lang=zh-CN']});
+ console.log('BROWSER_READY');
+ const pc=await browser.newPage(),phone=await browser.newPage();await pc.setViewport({width:1280,height:860});await phone.setViewport({width:390,height:844,isMobile:true,hasTouch:true,deviceScaleFactor:1});
+ pc.setDefaultTimeout(12000);phone.setDefaultTimeout(12000);
+ const errors=[];for(const p of [pc,phone])p.on('pageerror',e=>errors.push(e.message));
+ console.log('PAGES_READY'); await pc.goto(A);console.log('PC_READY');await phone.goto(B);console.log('PHONE_READY');await pc.bringToFront();console.log('PC_ACTIVE');await pc.waitForSelector('.book-card',{timeout:10000});await phone.bringToFront();console.log('PHONE_ACTIVE');await phone.waitForSelector('.book-card',{timeout:10000});
+ console.log('CARDS_READY');await pc.bringToFront();await pc.click('.book-card');console.log('PC_BOOK_CLICKED');await pc.waitForFunction(()=>document.querySelector('#chapterFrame').contentDocument?.body?.textContent.length>20);await new Promise(r=>setTimeout(r,600));
+ console.log('PC_READER_READY');await pc.click('#readerView [data-stella]');console.log('PC_SYNC_OPEN');await pc.click('#exportProgress');const code=await pc.$eval('#progressCode',n=>n.value);assert(code.startsWith('STELLA1.'));ok('生成可复制的 Stella 进度码');
+ await phone.bringToFront();await phone.click('#libraryView [data-stella]');await phone.$eval('#progressCode',(n,v)=>n.value=v,code);await phone.click('#applyProgress');await phone.waitForFunction(()=>!document.getElementById('stellaPanel').open&&!document.getElementById('readerView').hidden);await new Promise(r=>setTimeout(r,800));
+ assert.equal(await phone.$eval('#chapterIndicator',n=>n.textContent),'第 1/6 章');ok('手机尺寸下进度码定位到正确书籍与章节');
+ const before=(await call(B,'/api/books/'+bookB.id)).book.progressUpdatedAt;await new Promise(r=>setTimeout(r,1400));const after=(await call(B,'/api/books/'+bookB.id)).book.progressUpdatedAt;assert.equal(before,after);ok('恢复位置与后台轮询不会篡改进度时间');
+ assert(await phone.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await phone.screenshot({path:path.join(__dirname,'shots','stella-phone-reader.png')});ok('390 像素手机布局无横向溢出');
+ await phone.bringToFront();await phone.click('#readerView [data-stella]');await phone.$eval('#progressCode',(n,v)=>n.value=v,code.slice(0,-1)+(code.endsWith('0')?'1':'0'));await phone.click('#applyProgress');assert.match(await phone.$eval('#syncStatus',n=>n.textContent),/校验失败/);ok('进度码损坏时拒绝跳转');await phone.click('#closeStella');
+ await pc.bringToFront();await pc.click('#closeStella');const frame=await pc.$('#chapterFrame');await pc.evaluate(()=>{const f=document.querySelector('#chapterFrame');const doc=f.contentDocument;for(let i=0;i<50;i++){const p=doc.createElementNS('http://www.w3.org/1999/xhtml','p');p.textContent='侧键翻页测试段落。'.repeat(10);doc.body.appendChild(p);}f.contentWindow.scrollTo(0,0);doc.dispatchEvent(new MouseEvent('mouseup',{button:4,bubbles:true}));});await new Promise(r=>setTimeout(r,600));assert(await pc.evaluate(()=>document.querySelector('#chapterFrame').contentWindow.scrollY>100));await pc.evaluate(()=>document.querySelector('#chapterFrame').contentDocument.dispatchEvent(new MouseEvent('mouseup',{button:3,bubbles:true})));await new Promise(r=>setTimeout(r,600));assert(await pc.evaluate(()=>document.querySelector('#chapterFrame').contentWindow.scrollY<5));ok('正文前侧键实际向前翻页，后侧键实际返回');
+ await new Promise(r=>setTimeout(r,1200));
+ const lan=await call(A,'/api/stella/lan','POST');assert(lan.enabled&&lan.addresses.length);const pairing=JSON.parse(Buffer.from(lan.addresses[0].code.slice(12),'base64url').toString());const auth={Authorization:'Bearer '+pairing.token,'Content-Type':'application/json'};
+ const unauthorized=await fetch(pairing.url+'/sync');assert.equal(unauthorized.status,401);ok('未配对设备无法读取书库');
+ const progress={spineIndex:4,scrollRatio:.45,percent:.74,chapterTitle:'第五章',locator:{paragraph:3,text:'测试段落',offset:.1}},stamp=Date.now();
+ let r=await fetch(pairing.url+'/sync',{method:'POST',headers:auth,body:JSON.stringify({fingerprint:bookB.fingerprint,progress,progressUpdatedAt:stamp})});assert(r.ok);assert.equal((await call(A,'/api/books/'+bookA.id)).book.progressUpdatedAt,stamp);ok('Wi-Fi 上传进度与时间戳完整保存');
+ await fetch(pairing.url+'/sync',{method:'POST',headers:auth,body:JSON.stringify({fingerprint:bookB.fingerprint,progress:{...progress,spineIndex:1},progressUpdatedAt:stamp-1000})});assert.equal((await call(A,'/api/books/'+bookA.id)).book.progress.spineIndex,4);ok('旧设备进度不会覆盖较新的位置');
+ const downloaded=Buffer.from(await(await fetch(pairing.url+'/book/'+bookA.id,{headers:auth})).arrayBuffer());assert(downloaded.equals(fs.readFileSync(fixture)));ok('Wi-Fi 复制 EPUB 后内容逐字节不变');
+ await call(A,'/api/books/'+bookA.id,'PATCH',{progress,progressUpdatedAt:stamp+1});assert.equal((await call(A,'/api/books/'+bookA.id)).book.progressUpdatedAt,stamp+1);ok('本机更新接口保留跨端时间戳');
+ await phone.bringToFront();await phone.click('#readerView [data-stella]');await phone.$eval('#lanPairCode',(n,v)=>n.value=v,lan.addresses[0].code);await phone.click('#pairLan');await phone.waitForFunction(()=>document.getElementById('syncStatus').textContent.includes('已同步'),{timeout:20000});assert.equal((await call(B,'/api/books/'+bookB.id)).book.progress.spineIndex,4);ok('手机界面配对后实际拉取电脑进度');
+ const english=(await call(A,'/api/books/import','POST',{path:path.join(__dirname,'fixtures','english.epub')})).book;await phone.click('#refreshRemote');await phone.waitForFunction(()=>document.getElementById('remoteBooks').options.length===2);await phone.click('#downloadMissing');await phone.waitForFunction(()=>document.getElementById('bookDownloadStatus').textContent.includes('本机缺少 0 本'),{timeout:30000});const downloadedBooks=(await call(B,'/api/books')).books;assert.equal(downloadedBooks.length,2);assert(downloadedBooks.some(b=>b.fingerprint===english.fingerprint));ok('一键下载手机缺少的小说，已有小说不重复');
+ await phone.click('#closeStella');await phone.screenshot({path:path.join(__dirname,'shots','stella-phone-synced.png')});
+ assert.equal(errors.length,0,errors.join('\n'));ok('桌面与手机流程无未捕获脚本错误');
+ await call(A,'/api/stella/lan','DELETE');assert.equal((await call(A,'/api/stella/lan')).enabled,false);ok('关闭 Wi-Fi 同步后配对服务停止');
+ console.log('STELLA_TESTS_PASS',count);
+})().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();for(const x of [a,b])if(x)x.server.close();setTimeout(()=>process.exit(process.exitCode||0),300);});
