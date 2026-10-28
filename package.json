@@ -1,6 +1,6 @@
 {
   "name": "stella-reader",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "description": "Stella 星阅 · 跨设备 EPUB 阅读与听书",
   "main": "shell/main.js",

@@ -40,6 +40,7 @@ export function createReader({ tts, onExit, onBookProgress } = {}) {
     prevPage: $('#btnPrevPage'),
     nextPage: $('#btnNextPage'),
     readingMode: $('#btnReadingMode'),
+    readingControls: $('#btnReadingControls'),
     settingReadingMode: $('#settingReadingMode'),
     veil: $('#frameVeil'),
     tocDrawer: $('#tocDrawer'),
@@ -95,6 +96,12 @@ export function createReader({ tts, onExit, onBookProgress } = {}) {
   let turnBusyUntil = 0;
   let lastProgressErrorToast = 0;
   let toolbarTimer = null;
+  let readingControlsTimer=null;
+  function setReadingControls(open){
+    clearTimeout(readingControlsTimer);els.view.classList.toggle('reading-controls-open',!!open);
+    els.readingControls?.setAttribute('aria-expanded',String(!!open));els.readingControls?.setAttribute('aria-label',open?'收起翻页菜单':'展开翻页菜单');if(els.readingControls)els.readingControls.textContent=open?'收起':'菜单';
+    requestAnimationFrame(updatePageUi);if(open)readingControlsTimer=setTimeout(()=>setReadingControls(false),5000);
+  }
   const HEADLESS = !!(navigator && navigator.webdriver);
 
   /* ------------------------------------------------------------------ */
@@ -120,6 +127,7 @@ export function createReader({ tts, onExit, onBookProgress } = {}) {
     els.author.textContent = '';
     showVeil(true);
     revealToolbar(true);
+    setReadingControls(false);
     resetSearch();
 
     try {
@@ -155,6 +163,7 @@ export function createReader({ tts, onExit, onBookProgress } = {}) {
     closeAllPanels();
     setTocOpen(false);
     pageLayoutObserver?.disconnect();
+    setReadingControls(false);
     state.loadSeq += 1;
     state.open = false;
     state.book = null;
@@ -537,6 +546,7 @@ mark.search-hit.ts-hit-flash { animation: tsHitFlash 1.4s ease-out 2; }
   function turnPage(direction) {
     if(!state.open || !state.win || !state.doc || pageTransition || Date.now()<turnBusyUntil)return;
     turnBusyUntil=Date.now()+170;
+    if(mobileLayout())setReadingControls(false);
     if(tts && tts.isActive())tts.stop({silent:true});
     const p=pageMetrics();
     if(direction>0 && p.y>=p.max-1){if(state.index<state.spine.length-1)animatePageChange(direction,()=>loadChapter(state.index+1));return;}
@@ -603,14 +613,14 @@ mark.search-hit.ts-hit-flash { animation: tsHitFlash 1.4s ease-out 2; }
       if(Date.now()<ignoreClickUntil){event.preventDefault();return;}
       if(event.target?.closest?.('a,button,input,textarea,select,video,audio') || String(win.getSelection?.()||'').trim())return;
       const width=win.innerWidth;
-      if(event.clientX<width*.18)turnPage(-1);else if(event.clientX>width*.82)turnPage(1);
+      if(event.clientX<width*.18)turnPage(-1);else if(event.clientX>width*.82)turnPage(1);else setReadingControls(!els.view.classList.contains('reading-controls-open'));
     });
     try { doc.addEventListener('click', onFrameClick, true); } catch { /* ignore */ }
     try { win.addEventListener('scroll', onFrameScroll, { passive: true }); } catch { /* ignore */ }
     try { doc.addEventListener('mouseup', onSideButton, true); doc.addEventListener('mousedown', preventSideButton, true); doc.addEventListener('auxclick', preventSideButton, true); } catch {}
     try { win.addEventListener('keydown', onFrameKeydown, true); } catch { /* ignore */ }
     try { win.addEventListener('mousemove', onActivity, { passive: true }); } catch { /* ignore */ }
-    try { win.addEventListener('touchstart', onActivity, { passive: true }); } catch { /* ignore */ }
+    try { win.addEventListener('touchstart', ()=>{if(!mobileLayout())onActivity();}, { passive: true }); } catch { /* ignore */ }
   }
 
   function preventSideButton(e) { if(state.open && (e.button===3||e.button===4)){e.preventDefault(); e.stopPropagation();} }
@@ -1041,7 +1051,8 @@ mark.search-hit.ts-hit-flash { animation: tsHitFlash 1.4s ease-out 2; }
   /* 事件绑定                                                             */
   /* ------------------------------------------------------------------ */
 
-  els.readingMode?.addEventListener('click',()=>updateSettings({readingMode:pagingMode()?'scroll':'paged'}));
+  els.readingControls?.addEventListener('click',()=>setReadingControls(!els.view.classList.contains('reading-controls-open')));
+  els.readingMode?.addEventListener('click',()=>{updateSettings({readingMode:pagingMode()?'scroll':'paged'});setReadingControls(false);});
   els.settingReadingMode?.addEventListener('change',()=>updateSettings({readingMode:els.settingReadingMode.value}));
   els.prevPage?.addEventListener('click',()=>turnPage(-1));
   els.nextPage?.addEventListener('click',()=>turnPage(1));

@@ -77,6 +77,9 @@ export function createTtsController(deps = {}) {
     sapiUnavailable: false,
     audioUrl: null,
     ttsAbort: null,
+    fallbackVoice: null,
+    speechRoute: 'direct',
+    errorMessage: '',
   };
 
   const stateListeners = new Set();
@@ -93,6 +96,9 @@ export function createTtsController(deps = {}) {
       advancing: state.advancing,
       sapiUnavailable: state.sapiUnavailable,
       panelOpen: state.panelOpen,
+      fallbackVoice: state.fallbackVoice?.name || '',
+      speechRoute: state.speechRoute,
+      errorMessage: state.errorMessage,
     };
   }
 
@@ -204,6 +210,7 @@ export function createTtsController(deps = {}) {
 
   function decideEngine() {
     const uri=getSettings().ttsVoice||'';
+    if(state.fallbackVoice)return 'native';
     if(uri.startsWith('native:') || (window.AndroidBridge && !uri))return 'native';
     if(/^(edge|pc|azure|openai):/.test(uri))return 'sapi';
     if (!synth) return 'sapi';
@@ -271,13 +278,13 @@ export function createTtsController(deps = {}) {
     state.paragraphs = collectParagraphs(doc);
     state.index = 0;
     state.currentText = state.paragraphs.length ? state.paragraphs[0].text : '';
-    if (options.autoplay) start();
+    if (options.autoplay) start({preserveRoute:true});
     else setStatus('idle');
   }
 
   /* ---------------- 播放 ---------------- */
 
-  async function start() {
+  async function start(options = {}) {
     if (state.status === 'paused') { resume(); return; }
     if (state.status === 'playing' || state.status === 'loading') return;
     if (!state.doc) { toast('请先打开一本书再开始朗读', 'info'); return; }
@@ -288,7 +295,7 @@ export function createTtsController(deps = {}) {
     if (needWait) setStatus('loading');
     await waitForVoices(1000);
     state.engine = decideEngine();
-    if (state.engine === 'sapi' && state.sapiUnavailable) { setStatus('idle'); return; }
+    state.sapiUnavailable=false;state.errorMessage='';if(!options.preserveRoute){state.fallbackVoice=null;state.speechRoute='direct';}
     state.index = clamp(state.index, 0, state.paragraphs.length - 1);
     speakCurrent();
   }
@@ -303,7 +310,7 @@ export function createTtsController(deps = {}) {
     setStatus('playing');
 
     state.engine=decideEngine();
-    if (state.engine === 'native') { try{window.AndroidBridge.speak(item.text,getSettings().ttsVoice||'',Number(getSettings().ttsRate),gen);}catch(e){failSapi(e.message);} return; }
+    if (state.engine === 'native') { try{window.AndroidBridge.speak(item.text,state.fallbackVoice?.voiceURI||getSettings().ttsVoice||'',Number(getSettings().ttsRate),gen);}catch(e){failSapi(e.message);} return; }
     if (state.engine === 'sapi') { speakSapi(item.text, gen); return; }
 
     try {
@@ -346,25 +353,25 @@ export function createTtsController(deps = {}) {
     const controller=new AbortController();state.ttsAbort=controller;const timeout=setTimeout(()=>controller.abort(),55000);
     setStatus('loading');
     try {
-      const send = window.AndroidBridge && /^(pc|azure|openai):/.test(getSettings().ttsVoice||'') ? (route,options)=>window.stellaRemote('/tts',options) : fetch;
-      const response = await send('/api/tts', {
-        method: 'POST',
-        signal:controller.signal,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        body: JSON.stringify({ text: clipped, voice:getSettings().ttsVoice, rate: clamp(getSettings().ttsRate, 0.6, 2) }),
-      });
-      if (gen !== state.gen) return;
-      if (!response.ok) {
-        let message = '系统语音合成失败';
-        try {
-          const data = await response.json();
-          if (data && data.error && data.error.message) message = data.error.message;
-        } catch { /* ignore */ }
-        throw new Error(message);
+      const voice=getSettings().ttsVoice||'';
+      const options={method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({text:clipped,voice,rate:clamp(getSettings().ttsRate,0.6,2)})};
+      async function requestAudio(remote=false){
+        const response=remote?await window.stellaRemote('/tts',{...options,timeoutMs:8000}):await fetch('/api/tts',options);
+        if(!response.ok){let message='语音连接失败';try{message=(await response.json()).error?.message||message;}catch{}throw new Error(message);}
+        const result=await response.blob();if(!result||result.size<44)throw new Error('语音返回了空音频');return result;
       }
-      const blob = await response.blob();
-      if (gen !== state.gen) return;
-      if (!blob || blob.size < 44) throw new Error('系统语音返回了空音频');
+      let blob;
+      try{
+        const useDesktop=!!window.AndroidBridge&&(/^(pc|azure|openai):/.test(voice)||state.speechRoute==='desktop');
+        blob=await requestAudio(useDesktop);
+      }catch(error){
+        if(gen!==state.gen||controller.signal.aborted)throw error;
+        if(window.AndroidBridge&&voice.startsWith('edge:')&&state.speechRoute!=='desktop'&&window.stellaRemote){
+          try{blob=await requestAudio(true);if(gen!==state.gen||controller.signal.aborted)return;state.speechRoute='desktop';toast('已通过配对电脑中转当前音色','info');}catch{}
+        }
+        if(!blob)throw error;
+      }
+      if(gen!==state.gen)return;
       revokeAudioUrl();
       const url = URL.createObjectURL(blob);
       state.audioUrl = url;
@@ -383,12 +390,19 @@ export function createTtsController(deps = {}) {
       setStatus('playing');
     } catch (err) {
       if (gen !== state.gen) return;
-      failSapi(err && err.message ? err.message : '未知错误');
+      if(window.AndroidBridge&&!controller.signal.aborted){
+        const selected=state.voices.find(v=>v.voiceURI===getSettings().ttsVoice);
+        const family=(selected?.lang||'zh').split(/[-_]/)[0].toLowerCase();
+        const offline=state.voices.find(v=>v.voiceURI.startsWith('native:')&&v.networkRequired===false&&String(v.lang).toLowerCase().split(/[-_]/)[0]===family);
+        if(offline){state.fallbackVoice=offline;state.speechRoute='native';state.sapiUnavailable=false;toast('在线声音暂不可用，已用手机离线声音继续；停止后重新播放可重试在线声音','info',6000);speakCurrent();return;}
+      }
+      failSapi(controller.signal.aborted?'语音连接超时，请点播放重试':(err?.message||'连接失败，请点播放重试'));
     }finally{clearTimeout(timeout);if(state.ttsAbort===controller)state.ttsAbort=null;}
   }
 
   function failSapi(message) {
     state.sapiUnavailable = true;
+    state.errorMessage=message;
     state.advancing = false;
     cancelPlayback();
     clearHighlight();
@@ -567,8 +581,8 @@ export function createTtsController(deps = {}) {
   function togglePanel() { if (state.panelOpen) closePanel(); else openPanel(); }
 
   function refreshCurrent() {
-    state.sapiUnavailable=false;
-    if (state.status === 'playing') {
+    state.sapiUnavailable=false;state.errorMessage='';state.fallbackVoice=null;state.speechRoute='direct';
+    if (state.status === 'playing' || state.status==='loading') {
       cancelPlayback();
       speakCurrent();
     } else {
@@ -640,7 +654,7 @@ export function bindTtsUi(tts) {
     if (zh.length) {
       parts.push('<optgroup label="中文语音">');
       zh.forEach((voice) => {
-        parts.push(`<option value="${escapeAttr(voice.voiceURI)}">${escapeAttr(voice.name)}${voice.lang ? ` · ${escapeAttr(voice.lang)}` : ''}</option>`);
+        parts.push(`<option value="${escapeAttr(voice.voiceURI)}">${escapeAttr(window.AndroidBridge&&voice.voiceURI.startsWith('edge:')?voice.name+'（无需电脑）':voice.name)}${voice.lang ? ` · ${escapeAttr(voice.lang)}` : ''}</option>`);
       });
       parts.push('</optgroup>');
     }
@@ -687,11 +701,11 @@ export function bindTtsUi(tts) {
 
     statusEl.classList.toggle('is-error', !!state.sapiUnavailable);
     if (state.sapiUnavailable) {
-      statusEl.textContent = '所选声音暂不可用，请切换声音或检查连接后重试。';
+      statusEl.textContent = (state.errorMessage||'所选声音暂不可用')+' · 点播放可重试';
     } else if (loading) {
       statusEl.textContent = state.advancing ? '正在载入下一章…' : '正在准备语音…';
     } else if (playing) {
-      statusEl.textContent = `正在朗读 · 第 ${state.index + 1}/${state.total} 段 · ${ENGINE_LABEL[state.engine] || ''}`;
+      statusEl.textContent = `正在朗读 · 第 ${state.index + 1}/${state.total} 段 · ${state.fallbackVoice?'手机离线声音（临时接替）':state.speechRoute==='desktop'?'电脑中转':ENGINE_LABEL[state.engine] || ''}`;
     } else if (paused) {
       statusEl.textContent = `已暂停 · 第 ${state.index + 1}/${state.total} 段`;
     } else if (state.total) {

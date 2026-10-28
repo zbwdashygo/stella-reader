@@ -1,10 +1,11 @@
 # Stella 星阅
 
-Windows 与 Android EPUB 阅读、听书工具。当前版本 **2.1.0**。
+Windows 与 Android EPUB 阅读、听书工具。当前版本 **2.1.1**。
 
 - 书库、目录、搜索、排版和主题设置。
-- 手机翻页动画，翻页与连续滑动模式切换，左下角显示章内页码及全书进度。
+- 手机翻页动画，翻页与连续滑动模式切换，左下角显示章内页码及全书进度。翻页按钮默认收起，点底部「菜单」展开；翻页或闲置 5 秒后自动收起。
 - 同一 Wi-Fi 下同步书籍和阅读进度，也可通过 `STELLA1` 进度码跨端定位。
+- 手机在线音源支持限时重试、多地址回退与已有 Wi-Fi 代理。失败后可直接点播放重试；若有同语种离线声音会临时接替，保留原音色选择。
 - 手机独立联网使用 Edge 在线音色；2.1.0 验证时目录含 322 个音色、14 个中文音色，服务目录可能变化。
 - 一键同步电脑的音色列表、当前音色和语速。电脑系统及私有 API 声音需要电脑在线；服务密钥留在电脑。
 - Windows 鼠标前侧键向前翻页，后侧键向后翻页。
@@ -62,6 +63,8 @@ node test/mobile-paging.cjs
 node test/stella-e2e.cjs
 node test/voice-sync.cjs
 node test/mobile-voice-sync.cjs
+node test/mobile-speech-recovery.cjs
+node test/remote-tts-cancel.cjs
 ```
 
 测试使用独立临时数据。部分测试需要 Windows、已安装 Microsoft Edge，以及可访问在线语音服务的网络。书籍测试样例由脚本生成或从 Project Gutenberg 下载，不随源码提交。
