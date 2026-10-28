@@ -29,3 +29,4 @@ android-signing/
 Thumbs.db
 *.log
 !vendor/python/python312.zip
+!vendor/pydeps/certifi/cacert.pem
